@@ -1,64 +1,55 @@
 # Walkthrough — Dark Web Monitor
 
-A practical guide to installing, configuring, and operating Dark Web Monitor from scratch.
+A practical guide to installing, configuring, and running Dark Web Monitor from scratch. By the end you'll have the full stack running, a source being crawled through Tor, and alerts firing when keywords match.
 
 ---
 
 ## Prerequisites
 
-Before you start, make sure you have:
-
-- **Docker** 24+ and **Docker Compose** v2+ installed
-- At minimum **4 GB of free RAM** (Elasticsearch claims ~1 GB on its own)
-- An outbound internet connection on the host (Tor needs to bootstrap)
-- A working SMTP server, Slack webhook, or generic webhook URL if you want alerts delivered somewhere (optional — you can run without notifications)
+| Requirement | Notes |
+|---|---|
+| Docker 24+ and Docker Compose v2+ | `docker compose version` to verify |
+| 4 GB+ free RAM | Elasticsearch claims ~1 GB on its own |
+| Outbound internet on the host | Tor needs to bootstrap |
+| `jq` (optional) | For pretty-printing API responses in the terminal |
 
 ---
 
-## 1. Installation
+## 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-handle/dark-web-monitor.git
+git clone https://github.com/sreenidhi-n/dark-web-monitor.git
 cd dark-web-monitor
-```
-
----
-
-## 2. Configuration
-
-Copy the example environment file and open it in an editor:
-
-```bash
 cp .env.example .env
 ```
 
-The minimum set of values you must change before starting:
+Open `.env` and change the three required values:
 
 | Variable | What to set |
 |---|---|
 | `POSTGRES_PASSWORD` | Any strong password |
 | `REDIS_PASSWORD` | Any strong password |
-| `SECRET_KEY` | Run `openssl rand -hex 32` and paste the output |
+| `SECRET_KEY` | `openssl rand -hex 32` — paste the output |
 
-Everything else has safe defaults for local use. For production deployments, also review `SMTP_*` and `SLACK_WEBHOOK_URL` if you want alert delivery.
+Everything else defaults to safe local values. Come back to `SMTP_*` and `SLACK_WEBHOOK_URL` later when you want real alert delivery.
 
 ---
 
-## 3. First Start
+## 2. Start the stack
 
 ```bash
 make up
 ```
 
-This starts all eight services in the background. First startup takes about 60 seconds — Elasticsearch needs time to become healthy before the backend and workers connect.
+This brings up all eight services in the background (postgres, redis, elasticsearch, tor, backend, worker, beat, frontend, nginx). First startup takes **60–90 seconds** — Elasticsearch is slow to become healthy.
 
-Watch the logs until everything is green:
+Watch progress:
 
 ```bash
 make logs
 ```
 
-You're looking for the backend to print:
+You're ready when the backend prints:
 
 ```
 INFO  [app.main] Starting Dark Web Monitor API
@@ -67,9 +58,7 @@ INFO  [app.search.client] Created Elasticsearch index: dwm_findings
 
 ---
 
-## 4. Database Setup
-
-Run the Alembic migration to create all tables:
+## 3. Run database migrations
 
 ```bash
 make migrate
@@ -79,59 +68,69 @@ Expected output:
 
 ```
 INFO  [alembic.runtime.migration] Running upgrade  -> 0001, initial schema
+INFO  [alembic.runtime.migration] Running upgrade 0001 -> 0002, add alert configs
 ```
 
 ---
 
-## 5. Create Your Admin User
+## 4. Create the admin user
 
-There are no default credentials. Create the first admin with:
+No default credentials exist. Bootstrap the first admin:
 
 ```bash
 make create-admin email=admin@example.com password=yourpassword
 ```
 
-This script is idempotent — running it again with the same email is a no-op.
+The script is idempotent — running it twice with the same email is a no-op.
 
 ---
 
-## 6. Open the Dashboard
+## 5. Log in to the UI
 
-Navigate to `http://localhost` in your browser. You will see the dashboard with four stat cards (all showing `—` until data exists) and an empty findings chart.
+Open **http://localhost** in your browser. You'll land on the login screen.
+
+Enter the email and password you just created. After login you'll see the dashboard:
+
+- **Findings** — total indexed documents
+- **Sources** — monitored `.onion` URLs
+- **Watchlists** — active monitoring profiles
+- **Alerts today** — keyword-match alerts triggered in the last 24 h
+
+All four cards show `—` until data exists — that's expected.
 
 ---
 
-## 7. Verify Tor Connectivity
+## 6. Verify Tor connectivity
 
-Before adding any sources, confirm that the backend is routing through Tor:
+Before crawling anything, confirm the backend is routing through Tor:
 
 ```bash
 make tor-check
 ```
 
-Expected output:
+Expected:
 ```
 Tor OK: True
 ```
 
-If you see `ERROR: not routing through Tor`, check the Tor container logs:
+If you see `False`, the Tor container is still bootstrapping. Wait 30 seconds and retry. Check logs with:
 
 ```bash
 docker compose logs tor
 ```
 
-Tor takes up to 30 seconds to bootstrap on first start. Wait and retry.
-
 ---
 
-## 8. Add Your First Source
+## 7. Add your first source
 
-A **source** is a `.onion` URL that the crawler will periodically visit and index.
+A **source** is a `.onion` URL the crawler will periodically visit and index.
 
-Use the API directly (the UI for this is coming in v0.4):
+**Via the UI:** navigate to **Sources** in the top nav → click **Add Source** → fill in the name, `.onion` URL, and how often to crawl (hours). Hit **Add Source**.
+
+**Via the API:**
 
 ```bash
-# First, get a token
+# Get an auth token
 TOKEN=$(curl -s -X POST http://localhost/api/v1/auth/login \
   -d "username=admin@example.com&password=yourpassword" \
   | jq -r .access_token)
@@ -142,18 +141,22 @@ curl -s -X POST http://localhost/api/v1/sources \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Example Paste Site",
-    "onion_url": "http://examplexxxxxxx.onion",
+    "onion_url": "http://examplexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion",
     "crawl_frequency_hours": 6
   }' | jq
 ```
 
-`crawl_frequency_hours` controls how often Celery beat will schedule a crawl for this source. The minimum effective value is `1`.
+`crawl_frequency_hours` is how often Celery beat schedules an automatic crawl. Minimum effective value is `1`.
 
 ---
 
-## 9. Create a Watchlist
+## 8. Create a watchlist
 
-A **watchlist** defines what to look for: keywords (e.g. brand terms, internal project names), domain names, and email addresses belonging to your organization.
+A **watchlist** defines what to look for: keywords (brand names, project names, internal terms), domains you own, and employee email addresses. Any finding whose content contains one or more of these triggers an alert.
+
+**Via the UI:** navigate to **Watchlists** → click **New Watchlist**. Type a keyword and press `Enter` or comma to add it as a tag. Add as many as you need across the Keywords, Domains, and Emails fields. Hit **Create**.
+
+**Via the API:**
 
 ```bash
 curl -s -X POST http://localhost/api/v1/watchlists \
@@ -161,22 +164,26 @@ curl -s -X POST http://localhost/api/v1/watchlists \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Acme Corp",
-    "keywords": ["acme", "acmecorp", "acme internal"],
+    "keywords": ["acme", "acmecorp", "project-aurora"],
     "domains": ["acmecorp.com", "acme.io"],
     "emails": ["ceo@acmecorp.com", "hr@acmecorp.com"]
   }' | jq
 ```
 
-Any finding whose scraped text contains one or more of these terms will trigger an alert.
+Keywords are normalised to lowercase and deduplicated automatically.
 
 ---
 
-## 10. Trigger a Manual Crawl
+## 9. Trigger a manual crawl
 
-To crawl a source immediately rather than waiting for the scheduler:
+Don't wait for the scheduler — crawl a source immediately.
+
+**Via the UI:** go to **Sources**, find the source row, click the **▷ play** button on the right.
+
+**Via the API:**
 
 ```bash
-# Get the source ID from the response above, then:
+# Replace 1 with your source's actual ID
 curl -s -X POST http://localhost/api/v1/sources/1/crawl \
   -H "Authorization: Bearer $TOKEN" | jq
 ```
@@ -186,30 +193,50 @@ Response:
 {"detail": "Crawl enqueued for source 1"}
 ```
 
-Watch the worker pick it up:
+Watch the Celery worker pick it up:
 
 ```bash
 make worker-logs
 ```
 
+You'll see it:
+1. Connect to the `.onion` site over Tor
+2. Extract and index the content
+3. Match against all active watchlists
+4. Create `Alert` records for any hits
+
 ---
 
-## 11. Search Findings
+## 10. Browse and search findings
 
-Once the crawler has run, search across all indexed content:
+Navigate to **Findings** in the UI.
+
+- **Browse mode** — paginated table of all indexed content, filterable by source and date
+- **Search mode** — type 2+ characters in the search box to switch to full-text Elasticsearch search with highlighted snippets; clear the box to return to browse mode
+
+Via the API — browse:
+
+```bash
+curl -s "http://localhost/api/v1/findings?page=1&page_size=20" \
+  -H "Authorization: Bearer $TOKEN" | jq
+```
+
+Via the API — full-text search:
 
 ```bash
 curl -s "http://localhost/api/v1/findings/search?q=acmecorp" \
   -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-The search runs against Elasticsearch with `multi_match` across the title, content, and matched keywords fields — with highlights returned so you can see exactly where the hit landed.
-
 ---
 
-## 12. Configure Alert Delivery
+## 11. Configure alert delivery
 
-Set up where alerts go when a keyword match is found:
+Set up where alerts go when a keyword match fires. You can have multiple configs per watchlist (e.g. email + Slack).
+
+**Via the UI:** go to **Alerts** → click **Notification Config** tab → **Add Config**. Select a watchlist, pick the channel (Email / Slack / Webhook), paste the destination, and save.
+
+**Via the API:**
 
 ```bash
 # Email
@@ -231,112 +258,143 @@ curl -s -X POST http://localhost/api/v1/alerts/config \
     "channel": "slack",
     "destination": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
   }' | jq
+
+# Generic webhook (SIEM, Splunk HEC, etc.)
+curl -s -X POST http://localhost/api/v1/alerts/config \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "watchlist_id": 1,
+    "channel": "webhook",
+    "destination": "https://your-siem.example.com/ingest"
+  }' | jq
+```
+
+For SMTP delivery, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` in `.env` and restart the stack (`make restart`).
+
+---
+
+## 12. Review and acknowledge alerts
+
+**Via the UI:** go to **Alerts** → **Alert History** tab. Each row shows the watchlist, channel, delivery status, and a checkmark button to acknowledge.
+
+**Via the API:**
+
+```bash
+# List unacknowledged alerts
+curl -s "http://localhost/api/v1/alerts/history?acknowledged=false" \
+  -H "Authorization: Bearer $TOKEN" | jq
+
+# Acknowledge alert ID 7
+curl -s -X POST http://localhost/api/v1/alerts/history/7/acknowledge \
+  -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 ---
 
-## 13. Generate an API Key
+## 13. Generate an API key
 
-For scripted access or SIEM integration, generate an API key tied to your user:
+For SIEM integration or scripted workflows, create a permanent API key:
 
 ```bash
 curl -s -X POST http://localhost/api/v1/auth/api-key \
   -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-Use it in subsequent requests with the `X-API-Key` header instead of Bearer:
+Use it with `X-API-Key` instead of `Authorization: Bearer`:
 
 ```bash
 curl -s http://localhost/api/v1/findings \
-  -H "X-API-Key: your_api_key_here" | jq
+  -H "X-API-Key: <your_key>" | jq
 ```
 
-Calling `POST /auth/api-key` again rotates the key — the old one is immediately invalidated.
+Calling `POST /auth/api-key` again immediately rotates the key.
 
 ---
 
-## 14. Export Findings
+## 14. Export findings
 
-Export all findings as a JSON file (suitable for SIEM ingestion or reporting):
+Download all findings as a JSON file:
 
 ```bash
 curl -s -X POST http://localhost/api/v1/export/findings \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"format": "json"}' \
+  -d '{}' \
   -o findings_export.json
 ```
 
-To scope the export to a specific source or watchlist:
+Scope by source or date:
 
 ```bash
--d '{"format": "json", "source_id": 1}'
--d '{"format": "json", "watchlist_id": 1}'
+-d '{"source_id": 1}'
+-d '{"since": "2025-01-01"}'
 ```
 
 ---
 
-## 15. Managing Users
+## 15. Add more users
 
-All user management is done via direct DB access in v1 (a user management UI is on the roadmap).
-
-Open a psql shell:
+Use `make create-admin` to add additional admins. For analysts (can create sources/watchlists, cannot delete) or read-only users, insert directly:
 
 ```bash
+# Generate a bcrypt hash first
+HASH=$(docker compose exec backend python -c \
+  "from passlib.context import CryptContext; \
+   print(CryptContext(schemes=['bcrypt']).hash('theirpassword'))")
+
+# Insert as analyst
 make shell-db
 ```
 
-Create a read-only user (for analysts who shouldn't be modifying sources or watchlists):
+Inside psql:
 
 ```sql
-INSERT INTO users (email, password_hash, role)
-VALUES ('analyst@acmecorp.com', '<bcrypt_hash>', 'readonly');
-```
+INSERT INTO users (email, password_hash, role, is_active)
+VALUES ('analyst@acmecorp.com', '<hash>', 'analyst', true);
 
-Generate a bcrypt hash with Python:
-
-```bash
-docker compose exec backend python -c \
-  "from passlib.context import CryptContext; \
-   print(CryptContext(schemes=['bcrypt']).hash('yourpassword'))"
+INSERT INTO users (email, password_hash, role, is_active)
+VALUES ('viewer@acmecorp.com', '<hash>', 'readonly', true);
 ```
 
 ---
 
-## 16. Day-to-Day Operations
+## 16. Run the test suite
 
-**Restart everything:**
 ```bash
-make restart
+cd backend
+pip install -r requirements.txt   # aiosqlite + pytest-asyncio needed
+pytest -v
 ```
 
-**Check crawler output:**
-```bash
-make worker-logs
-```
-
-**Run a one-off migration after a model change:**
-```bash
-make makemigration name="add_tags_to_watchlist"
-make migrate
-```
-
-**Full interactive backend shell** (for debugging, running scripts):
-```bash
-make shell-backend
-```
+Tests use an in-memory SQLite database — no running PostgreSQL, Redis, or Elasticsearch required. 38 tests across auth, sources, watchlists, alerts, and the scraper module.
 
 ---
 
-## 17. Stopping and Cleaning Up
+## 17. Day-to-day operations
 
-Stop all containers (data volumes are preserved):
+| Task | Command |
+|---|---|
+| Restart everything | `make restart` |
+| Tail all logs | `make logs` |
+| Tail only worker | `make worker-logs` |
+| Open backend shell | `make shell-backend` |
+| Open psql shell | `make shell-db` |
+| Add migration | `make makemigration name=describe_change` |
+| Apply migrations | `make migrate` |
+| Run linter | `make lint` |
+
+---
+
+## 18. Stopping and cleanup
+
+Stop containers (data volumes preserved):
 
 ```bash
 make down
 ```
 
-To also wipe all data (destructive — drops all volumes):
+Full reset — destroys all volumes and data:
 
 ```bash
 docker compose down -v
@@ -344,42 +402,56 @@ docker compose down -v
 
 ---
 
-## API Reference
+## API reference
 
-Interactive API docs (Swagger UI) are available at:
-
-```
-http://localhost/api/v1/docs
-```
-
-ReDoc (read-only, better for sharing):
+Interactive Swagger UI — try every endpoint in the browser:
 
 ```
-http://localhost/api/v1/redoc
+http://localhost/docs
 ```
 
-Both are auto-generated from the FastAPI OpenAPI schema and stay in sync with the code.
+ReDoc (read-only, better for sharing with a team):
+
+```
+http://localhost/redoc
+```
 
 ---
 
 ## Troubleshooting
 
-**Elasticsearch not healthy on startup**
+**Elasticsearch not healthy after 90 seconds**
 
-Give it 90 seconds. If it still fails, check it has enough memory:
+Check for OOM:
 ```bash
-docker compose logs elasticsearch | grep -i error
+docker compose logs elasticsearch | grep -i "error\|fatal"
 ```
-Increase `ES_JAVA_OPTS` heap in `docker-compose.yml` if the host has more RAM available.
+Increase `ES_JAVA_OPTS` heap in `docker-compose.yml` if the host has available RAM. The default `-Xms512m -Xmx512m` is the minimum.
 
-**`make migrate` fails with "could not connect to server"**
+**`make migrate` fails — "could not connect to server"**
 
-Postgres isn't ready yet. Run `make logs` and wait for `database system is ready to accept connections`, then retry.
+Postgres isn't ready yet. Run `make logs`, wait for `database system is ready to accept connections`, then retry.
 
 **Tor check returns False**
 
-The Tor container takes up to 60 seconds to bootstrap on first start. Wait and re-run `make tor-check`. If it still fails, the container may be blocked from reaching the Tor network — check your host firewall.
+Bootstrap takes up to 60 seconds on first start. Check:
+```bash
+docker compose logs tor | tail -30
+```
+Look for `Bootstrapped 100%`. If the host network blocks Tor, configure bridges in `infra/tor/torrc.example`.
 
-**JWT expired**
+**Login fails immediately after `make create-admin`**
 
-Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 480 = 8 hours). Log in again via `POST /auth/login`.
+Run `make migrate` first. The user table must exist before the admin script can write to it.
+
+**JWT expired (401 after a few hours)**
+
+Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default: 480 min / 8 hours). Log in again. Increase the value in `.env` if needed.
+
+**Worker task stuck / not picking up crawl jobs**
+
+Check Redis is healthy:
+```bash
+docker compose ps redis
+docker compose exec backend celery -A app.crawler.scheduler.celery_app inspect active
+```
