@@ -89,6 +89,8 @@ class TestAlertHistory:
         finding = Finding(
             source_id=source.id,
             url="http://abc.onion/page",
+            title="Test finding",
+            content_snippet="some leaked data here",
             content_hash="deadbeef" * 8,
             matched_keywords=["leak"],
         )

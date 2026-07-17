@@ -5,6 +5,15 @@ required. Each test function gets a fresh schema to prevent state leaking
 between tests.
 """
 
+import os
+
+# Must be set before any app module is imported, because app/config.py
+# instantiates Settings() at module level when first imported.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use")
+
+from passlib.context import CryptContext
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,7 +26,11 @@ import app.models  # noqa: F401 — registers all models with Base.metadata
 from app.database import Base, get_db
 from app.main import app
 from app.models.user import Role, User
-from app.routers.auth import create_access_token, pwd_context
+from app.routers.auth import create_access_token
+
+# passlib 1.7.x + bcrypt >=4.0 are incompatible on Python 3.13.
+# Use sha256_crypt for tests — fast, no C extension quirks, same passlib API.
+_test_pwd_ctx = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -64,6 +77,7 @@ async def client(db):
     with (
         patch("app.main.get_es_client", return_value=mock_es),
         patch("app.main.ensure_index", new=AsyncMock()),
+        patch("app.routers.auth.pwd_context", _test_pwd_ctx),
     ):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -79,7 +93,7 @@ async def client(db):
 async def _make_user(db, email: str, role: Role) -> User:
     user = User(
         email=email,
-        password_hash=pwd_context.hash("password"),
+        password_hash=_test_pwd_ctx.hash("password"),
         role=role,
         is_active=True,
     )
