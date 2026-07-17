@@ -1,0 +1,127 @@
+# ============================================================
+# SECURITY — never commit these
+# ============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+certs/
+tor/
+privoxy/
+# Tor hidden service keys (operator-generated, never shared)
+hidden_service/
+
+# ============================================================
+# Python / FastAPI / Celery
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+celerybeat-schedule
+celerybeat.pid
+*.pyc
+
+# ============================================================
+# Node / Next.js / Frontend
+# ============================================================
+node_modules/
+.next/
+out/
+.nuxt/
+.cache/
+.parcel-cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# ============================================================
+# Docker
+# ============================================================
+# Persist volumes locally, never commit data
+postgres-data/
+redis-data/
+elasticsearch-data/
+docker-compose.override.yml
+
+# ============================================================
+# Elasticsearch
+# ============================================================
+elasticsearch/data/
+elasticsearch/logs/
+
+# ============================================================
+# Database dumps / exports
+# ============================================================
+*.sql
+*.dump
+*.db
+*.sqlite3
+
+# ============================================================
+# Findings exports (may contain sensitive PII)
+# ============================================================
+exports/
+reports/
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+logs/
+log/
+
+# ============================================================
+# IDE / editor
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Testing / coverage
+# ============================================================
+.coverage
+.pytest_cache/
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+
+# ============================================================
+# Build artifacts
+# ============================================================
+*.min.js
+*.min.css
+/frontend/.next/
+/backend/staticfiles/
