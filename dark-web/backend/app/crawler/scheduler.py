@@ -13,7 +13,7 @@ from app.models.alert import Alert, AlertChannel
 from app.models.alert_config import AlertConfig
 from app.models.finding import Finding
 from app.models.source import Source
-from app.models.watchlist import Watchlist
+from app.models.watchlist import Watchlist, ThreatCategory, CATEGORY_SEVERITY
 from app.notifications.email import send_alert_email
 from app.notifications.slack import send_slack_alert
 from app.notifications.webhook import send_webhook_alert
@@ -144,6 +144,7 @@ async def _crawl_source_async(source_id: int) -> dict:
 
         all_matched: list[str] = []
         wl_matches: list[tuple[Watchlist, list[str]]] = []
+        matched_categories: list[ThreatCategory] = []
 
         for wl in watchlists:
             terms = wl.keywords + wl.domains + wl.emails
@@ -151,15 +152,37 @@ async def _crawl_source_async(source_id: int) -> dict:
             if matched:
                 wl_matches.append((wl, matched))
                 all_matched.extend(matched)
+                try:
+                    matched_categories.append(ThreatCategory(wl.category))
+                except ValueError:
+                    matched_categories.append(ThreatCategory.GENERAL)
+
+        # Derive severity from the most severe matched category
+        severity_order = ["critical", "high", "medium", "low"]
+        candidate_severities = [CATEGORY_SEVERITY.get(c, "low") for c in matched_categories]
+        severity = min(candidate_severities, key=lambda s: severity_order.index(s)) if candidate_severities else "low"
+
+        # CSAM: never store content — only URL + hash for dedup and audit trail
+        is_csam = ThreatCategory.CSAM in matched_categories
+        if is_csam:
+            content_snippet = "[CONTENT WITHHELD — POTENTIAL CSAM INDICATOR]"
+            severity = "critical"
+            logger.critical(
+                "CSAM INDICATOR DETECTED — source=%s url=%s hash=%s keywords=%s",
+                source_id, scraped["url"], content_hash[:16], all_matched,
+            )
+        else:
+            content_snippet = scraped["snippet"]
 
         # ── 5. Create Finding ────────────────────────────────────────────────
         finding = Finding(
             source_id=source_id,
             url=scraped["url"],
             title=scraped.get("title") or None,
-            content_snippet=scraped["snippet"],
+            content_snippet=content_snippet,
             content_hash=content_hash,
             matched_keywords=list(set(all_matched)),
+            severity=severity,
             first_seen=now,
             last_seen=now,
         )

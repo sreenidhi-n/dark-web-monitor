@@ -1,9 +1,32 @@
 from datetime import datetime
+from enum import Enum
 
 from sqlalchemy import DateTime, ForeignKey, JSON, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class ThreatCategory(str, Enum):
+    GENERAL     = "general"
+    NARCOTICS   = "narcotics"
+    WEAPONS     = "weapons"
+    TRAFFICKING = "trafficking"
+    CSAM        = "csam"
+    FRAUD       = "fraud"
+    HACKING     = "hacking"
+
+
+# Maps category → finding severity
+CATEGORY_SEVERITY: dict[ThreatCategory, str] = {
+    ThreatCategory.CSAM:        "critical",
+    ThreatCategory.TRAFFICKING: "high",
+    ThreatCategory.WEAPONS:     "high",
+    ThreatCategory.NARCOTICS:   "medium",
+    ThreatCategory.FRAUD:       "medium",
+    ThreatCategory.HACKING:     "medium",
+    ThreatCategory.GENERAL:     "low",
+}
 
 
 class Watchlist(Base):
@@ -15,6 +38,7 @@ class Watchlist(Base):
     keywords: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     domains: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     emails: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False, default=ThreatCategory.GENERAL.value)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

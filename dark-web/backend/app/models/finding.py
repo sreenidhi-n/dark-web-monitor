@@ -17,6 +17,7 @@ class Finding(Base):
     content_snippet: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     matched_keywords: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

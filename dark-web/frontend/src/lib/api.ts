@@ -49,6 +49,7 @@ export async function getFindings(params?: {
   page_size?: number;
   source_id?: number;
   keyword?: string;
+  severity?: string;
   since?: string;
 }): Promise<FindingsPage> {
   const qs = new URLSearchParams();
@@ -56,6 +57,7 @@ export async function getFindings(params?: {
   if (params?.page_size) qs.set("page_size", String(params.page_size));
   if (params?.source_id) qs.set("source_id", String(params.source_id));
   if (params?.keyword) qs.set("keyword", params.keyword);
+  if (params?.severity) qs.set("severity", params.severity);
   if (params?.since) qs.set("since", params.since);
   return apiFetch<FindingsPage>(`/findings?${qs}`);
 }
@@ -109,13 +111,14 @@ export async function createWatchlist(payload: {
   keywords: string[];
   domains: string[];
   emails: string[];
+  category: string;
 }): Promise<Watchlist> {
   return apiFetch<Watchlist>("/watchlists", { method: "POST", body: JSON.stringify(payload) });
 }
 
 export async function updateWatchlist(
   id: number,
-  payload: { name: string; keywords: string[]; domains: string[]; emails: string[] }
+  payload: { name: string; keywords: string[]; domains: string[]; emails: string[]; category: string }
 ): Promise<Watchlist> {
   return apiFetch<Watchlist>(`/watchlists/${id}`, { method: "PUT", body: JSON.stringify(payload) });
 }

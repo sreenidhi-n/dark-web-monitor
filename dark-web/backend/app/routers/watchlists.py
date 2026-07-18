@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import Role, User
-from app.models.watchlist import Watchlist
+from app.models.watchlist import Watchlist, ThreatCategory
 from app.routers.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/watchlists", tags=["watchlists"])
@@ -18,6 +18,7 @@ class WatchlistCreate(BaseModel):
     keywords: list[str] = []
     domains: list[str] = []
     emails: list[str] = []
+    category: ThreatCategory = ThreatCategory.GENERAL
 
     @field_validator("keywords", "domains", "emails", mode="before")
     @classmethod
@@ -38,6 +39,7 @@ class WatchlistOut(BaseModel):
     keywords: list[str]
     domains: list[str]
     emails: list[str]
+    category: str
     is_active: bool
     created_at: datetime
 
@@ -83,6 +85,7 @@ async def create_watchlist(
         keywords=payload.keywords,
         domains=payload.domains,
         emails=payload.emails,
+        category=payload.category.value,
     )
     db.add(wl)
     await db.commit()
@@ -114,6 +117,7 @@ async def update_watchlist(
     wl.keywords = payload.keywords
     wl.domains = payload.domains
     wl.emails = payload.emails
+    wl.category = payload.category.value
     await db.commit()
     await db.refresh(wl)
     return wl

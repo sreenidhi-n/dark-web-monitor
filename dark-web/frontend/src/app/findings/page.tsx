@@ -9,15 +9,32 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatRelative, truncate } from "@/lib/utils";
-import type { Finding, SearchHit } from "@/lib/types";
+import type { Finding, SearchHit, Severity } from "@/lib/types";
 
 const PAGE_SIZE = 20;
+
+const SEVERITY_META: Record<Severity, { label: string; cls: string }> = {
+  critical: { label: "CRITICAL", cls: "bg-red-600 text-white" },
+  high:     { label: "HIGH",     cls: "bg-orange-500 text-white" },
+  medium:   { label: "MED",      cls: "bg-yellow-600 text-white" },
+  low:      { label: "LOW",      cls: "bg-gray-700 text-gray-300" },
+};
+
+function SeverityBadge({ severity }: { severity: Severity }) {
+  const meta = SEVERITY_META[severity] ?? SEVERITY_META.low;
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${meta.cls}`}>
+      {meta.label}
+    </span>
+  );
+}
 
 export default function FindingsPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [sourceFilter, setSourceFilter] = useState<number | undefined>();
+  const [severityFilter, setSeverityFilter] = useState<Severity | "">("");
   const [since, setSince] = useState("");
   const [expanded, setExpanded] = useState<number | string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -35,9 +52,9 @@ export default function FindingsPage() {
   const isSearchMode = debouncedQuery.length >= 2;
 
   const browseQuery = useQuery({
-    queryKey: ["findings", page, sourceFilter, since],
+    queryKey: ["findings", page, sourceFilter, severityFilter, since],
     queryFn: () =>
-      getFindings({ page, page_size: PAGE_SIZE, source_id: sourceFilter, since: since || undefined }),
+      getFindings({ page, page_size: PAGE_SIZE, source_id: sourceFilter, severity: severityFilter || undefined, since: since || undefined }),
     enabled: !isSearchMode,
   });
 
@@ -91,14 +108,25 @@ export default function FindingsPage() {
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
+          <select
+            value={severityFilter}
+            onChange={(e) => { setSeverityFilter(e.target.value as Severity | ""); setPage(1); }}
+            className="bg-gray-900 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-300 focus:outline-none focus:border-gray-600"
+          >
+            <option value="">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
           <input
             type="date"
             value={since}
             onChange={(e) => { setSince(e.target.value); setPage(1); }}
             className="bg-gray-900 border border-gray-800 rounded px-2.5 py-1 text-xs text-gray-400 focus:outline-none focus:border-gray-600"
           />
-          {(sourceFilter || since) && (
-            <button onClick={() => { setSourceFilter(undefined); setSince(""); }} className="text-xs text-gray-500 hover:text-gray-300">
+          {(sourceFilter || severityFilter || since) && (
+            <button onClick={() => { setSourceFilter(undefined); setSeverityFilter(""); setSince(""); }} className="text-xs text-gray-500 hover:text-gray-300">
               Clear
             </button>
           )}
@@ -156,12 +184,19 @@ export default function FindingsPage() {
 }
 
 function FindingCard({ finding, expanded, onToggle }: { finding: Finding; expanded: boolean; onToggle: () => void }) {
+  const isCritical = finding.severity === "critical";
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors cursor-pointer" onClick={onToggle}>
+    <div
+      className={`rounded-lg border bg-gray-900 p-4 hover:border-gray-700 transition-colors cursor-pointer ${isCritical ? "border-red-800" : "border-gray-800"}`}
+      onClick={onToggle}
+    >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-200 truncate">{finding.title || truncate(finding.url, 80)}</p>
-          <a href="#" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 mt-0.5 font-mono">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <SeverityBadge severity={finding.severity as Severity} />
+            <p className="text-sm font-medium text-gray-200 truncate">{finding.title || truncate(finding.url, 70)}</p>
+          </div>
+          <a href="#" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 font-mono">
             {truncate(finding.url, 60)} <ExternalLink size={10} />
           </a>
         </div>
@@ -176,7 +211,7 @@ function FindingCard({ finding, expanded, onToggle }: { finding: Finding; expand
         )}
       </div>
       {expanded && (
-        <p className="mt-3 text-xs text-gray-400 leading-relaxed border-t border-gray-800 pt-3">
+        <p className={`mt-3 text-xs leading-relaxed border-t border-gray-800 pt-3 ${isCritical ? "text-red-300" : "text-gray-400"}`}>
           {finding.content_snippet}
         </p>
       )}

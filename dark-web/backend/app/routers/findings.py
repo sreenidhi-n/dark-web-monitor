@@ -22,6 +22,7 @@ class FindingOut(BaseModel):
     title: Optional[str]
     content_snippet: str
     matched_keywords: list[str]
+    severity: str
     first_seen: datetime
     last_seen: datetime
 
@@ -59,11 +60,12 @@ async def list_findings(
     page_size: int = Query(20, ge=1, le=100),
     source_id: Optional[int] = Query(None),
     keyword: Optional[str] = Query(None, description="Filter by a matched keyword"),
+    severity: Optional[str] = Query(None, description="Filter by severity: low, medium, high, critical"),
     since: Optional[datetime] = Query(None, description="Return findings first seen after this timestamp"),
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    filters = _build_filters(source_id, keyword, since)
+    filters = _build_filters(source_id, keyword, severity, since)
 
     total_result = await db.execute(select(func.count()).select_from(Finding).where(*filters))
     total = total_result.scalar_one()
@@ -111,6 +113,7 @@ async def get_finding(
 def _build_filters(
     source_id: Optional[int],
     keyword: Optional[str],
+    severity: Optional[str],
     since: Optional[datetime],
 ) -> list:
     filters = []
@@ -119,6 +122,8 @@ def _build_filters(
     if keyword:
         # PostgreSQL JSON @> containment — checks if the array includes this string
         filters.append(Finding.matched_keywords.contains([keyword]))
+    if severity:
+        filters.append(Finding.severity == severity)
     if since:
         filters.append(Finding.first_seen >= since)
     return filters

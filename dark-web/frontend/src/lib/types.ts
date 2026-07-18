@@ -1,5 +1,7 @@
 export type Role = "admin" | "analyst" | "readonly";
 export type AlertChannel = "email" | "slack" | "webhook";
+export type ThreatCategory = "general" | "narcotics" | "weapons" | "trafficking" | "csam" | "fraud" | "hacking";
+export type Severity = "low" | "medium" | "high" | "critical";
 
 export interface User {
   id: number;
@@ -26,6 +28,7 @@ export interface Finding {
   title: string | null;
   content_snippet: string;
   matched_keywords: string[];
+  severity: Severity;
   first_seen: string;
   last_seen: string;
 }
@@ -54,6 +57,7 @@ export interface Watchlist {
   keywords: string[];
   domains: string[];
   emails: string[];
+  category: ThreatCategory;
   is_active: boolean;
   created_at: string;
 }
