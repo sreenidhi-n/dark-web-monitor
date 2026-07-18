@@ -14,84 +14,97 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-role_enum = sa.Enum("admin", "analyst", "readonly", name="role")
-channel_enum = sa.Enum("email", "slack", "webhook", name="alertchannel")
-
 
 def upgrade() -> None:
-    role_enum.create(op.get_bind(), checkfirst=True)
-    channel_enum.create(op.get_bind(), checkfirst=True)
+    # Create enum types first via raw DDL with duplicate-safe DO blocks.
+    # Using raw SQL here intentionally to avoid SQLAlchemy re-attempting
+    # CREATE TYPE inside op.create_table when it copies Enum column types.
+    op.execute(sa.text(
+        "DO $$ BEGIN "
+        "CREATE TYPE role AS ENUM ('admin', 'analyst', 'readonly'); "
+        "EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
+    op.execute(sa.text(
+        "DO $$ BEGIN "
+        "CREATE TYPE alertchannel AS ENUM ('email', 'slack', 'webhook'); "
+        "EXCEPTION WHEN duplicate_object THEN null; END $$;"
+    ))
 
-    op.create_table(
-        "users",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("password_hash", sa.String(255), nullable=False),
-        sa.Column("role", sa.Enum("admin", "analyst", "readonly", name="role"), nullable=False, server_default="analyst"),
-        sa.Column("api_key", sa.String(64), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.UniqueConstraint("email", name="uq_users_email"),
-        sa.UniqueConstraint("api_key", name="uq_users_api_key"),
-    )
-    op.create_index("ix_users_email", "users", ["email"])
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS users (
+            id          SERIAL PRIMARY KEY,
+            email       VARCHAR(255) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            role        role NOT NULL DEFAULT 'analyst',
+            api_key     VARCHAR(64),
+            is_active   BOOLEAN NOT NULL DEFAULT true,
+            created_at  TIMESTAMPTZ DEFAULT now(),
+            CONSTRAINT uq_users_email    UNIQUE (email),
+            CONSTRAINT uq_users_api_key  UNIQUE (api_key)
+        )
+    """))
+    op.create_index("ix_users_email",   "users", ["email"])
     op.create_index("ix_users_api_key", "users", ["api_key"])
 
-    op.create_table(
-        "sources",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("onion_url", sa.Text(), nullable=False),
-        sa.Column("crawl_frequency_hours", sa.Integer(), nullable=False, server_default="24"),
-        sa.Column("last_crawled_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("created_by_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-        sa.UniqueConstraint("onion_url", name="uq_sources_onion_url"),
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS sources (
+            id                     SERIAL PRIMARY KEY,
+            name                   VARCHAR(255) NOT NULL,
+            onion_url              TEXT NOT NULL,
+            crawl_frequency_hours  INTEGER NOT NULL DEFAULT 24,
+            last_crawled_at        TIMESTAMPTZ,
+            is_active              BOOLEAN NOT NULL DEFAULT true,
+            created_at             TIMESTAMPTZ DEFAULT now(),
+            created_by_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT uq_sources_onion_url UNIQUE (onion_url)
+        )
+    """))
 
-    op.create_table(
-        "findings",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("source_id", sa.Integer(), sa.ForeignKey("sources.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("url", sa.Text(), nullable=False),
-        sa.Column("title", sa.String(512), nullable=True),
-        sa.Column("content_snippet", sa.Text(), nullable=False),
-        sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column("matched_keywords", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("first_seen", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("last_seen", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.UniqueConstraint("content_hash", name="uq_findings_content_hash"),
-    )
-    op.create_index("ix_findings_source_id", "findings", ["source_id"])
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS findings (
+            id               SERIAL PRIMARY KEY,
+            source_id        INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+            url              TEXT NOT NULL,
+            title            VARCHAR(512),
+            content_snippet  TEXT NOT NULL,
+            content_hash     VARCHAR(64) NOT NULL,
+            matched_keywords JSON NOT NULL DEFAULT '[]',
+            first_seen       TIMESTAMPTZ DEFAULT now(),
+            last_seen        TIMESTAMPTZ DEFAULT now(),
+            CONSTRAINT uq_findings_content_hash UNIQUE (content_hash)
+        )
+    """))
+    op.create_index("ix_findings_source_id",    "findings", ["source_id"])
     op.create_index("ix_findings_content_hash", "findings", ["content_hash"])
 
-    op.create_table(
-        "watchlists",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("owner_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("keywords", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("domains", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("emails", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id         SERIAL PRIMARY KEY,
+            name       VARCHAR(255) NOT NULL,
+            owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            keywords   JSON NOT NULL DEFAULT '[]',
+            domains    JSON NOT NULL DEFAULT '[]',
+            emails     JSON NOT NULL DEFAULT '[]',
+            is_active  BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+    """))
     op.create_index("ix_watchlists_owner_id", "watchlists", ["owner_id"])
 
-    op.create_table(
-        "alerts",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("watchlist_id", sa.Integer(), sa.ForeignKey("watchlists.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("finding_id", sa.Integer(), sa.ForeignKey("findings.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("triggered_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("channel", sa.Enum("email", "slack", "webhook", name="alertchannel"), nullable=False),
-        sa.Column("delivered", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("acknowledged", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=True),
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id              SERIAL PRIMARY KEY,
+            watchlist_id    INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+            finding_id      INTEGER NOT NULL REFERENCES findings(id)   ON DELETE CASCADE,
+            triggered_at    TIMESTAMPTZ DEFAULT now(),
+            channel         alertchannel NOT NULL,
+            delivered       BOOLEAN NOT NULL DEFAULT false,
+            acknowledged    BOOLEAN NOT NULL DEFAULT false,
+            acknowledged_at TIMESTAMPTZ
+        )
+    """))
     op.create_index("ix_alerts_watchlist_id", "alerts", ["watchlist_id"])
-    op.create_index("ix_alerts_finding_id", "alerts", ["finding_id"])
+    op.create_index("ix_alerts_finding_id",   "alerts", ["finding_id"])
 
 
 def downgrade() -> None:
@@ -100,5 +113,5 @@ def downgrade() -> None:
     op.drop_table("findings")
     op.drop_table("sources")
     op.drop_table("users")
-    channel_enum.drop(op.get_bind(), checkfirst=True)
-    role_enum.drop(op.get_bind(), checkfirst=True)
+    op.execute(sa.text("DROP TYPE IF EXISTS alertchannel"))
+    op.execute(sa.text("DROP TYPE IF EXISTS role"))

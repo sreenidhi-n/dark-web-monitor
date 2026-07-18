@@ -20,9 +20,9 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
 
 export default function Dashboard() {
   const { data: findings } = useQuery({ queryKey: ["findings"], queryFn: () => getFindings() });
-  const { data: sources } = useQuery({ queryKey: ["sources"], queryFn: getSources });
+  const { data: sources } = useQuery({ queryKey: ["sources"], queryFn: () => getSources() });
   const { data: watchlists } = useQuery({ queryKey: ["watchlists"], queryFn: getWatchlists });
-  const { data: alerts } = useQuery({ queryKey: ["alerts"], queryFn: getAlertHistory });
+  const { data: alerts } = useQuery({ queryKey: ["alerts"], queryFn: () => getAlertHistory() });
 
   const todayAlerts =
     alerts?.filter(

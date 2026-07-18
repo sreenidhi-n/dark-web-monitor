@@ -16,24 +16,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "alert_configs",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column(
-            "watchlist_id",
-            sa.Integer(),
-            sa.ForeignKey("watchlists.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column(
-            "channel",
-            sa.Enum("email", "slack", "webhook", name="alertchannel"),
-            nullable=False,
-        ),
-        sa.Column("destination", sa.String(512), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
+    # Use raw SQL to avoid SQLAlchemy re-creating the alertchannel enum
+    # type (which already exists from migration 0001) via op.create_table().
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS alert_configs (
+            id            SERIAL PRIMARY KEY,
+            watchlist_id  INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+            channel       alertchannel NOT NULL,
+            destination   VARCHAR(512) NOT NULL,
+            is_active     BOOLEAN NOT NULL DEFAULT true,
+            created_at    TIMESTAMPTZ DEFAULT now()
+        )
+    """))
     op.create_index("ix_alert_configs_watchlist_id", "alert_configs", ["watchlist_id"])
 
 
