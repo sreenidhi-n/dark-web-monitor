@@ -1,4 +1,5 @@
 import logging
+import os
 
 import requests
 from stem import Signal
@@ -7,6 +8,10 @@ from stem.control import Controller
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# When DIRECT_HTTP=true the session routes through the normal network stack
+# instead of Tor — useful for testing with clearnet URLs locally.
+_DIRECT_HTTP = os.getenv("DIRECT_HTTP", "false").lower() == "true"
 
 
 class TorSession:
@@ -21,13 +26,16 @@ class TorSession:
         self.control_password = control_password or settings.tor_control_password
         self._request_count = 0
         self._session = self._build_session()
+        if _DIRECT_HTTP:
+            logger.warning("DIRECT_HTTP=true — Tor proxy disabled, using clearnet")
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
-        session.proxies = {
-            "http": self.proxy_url,
-            "https": self.proxy_url,
-        }
+        if not _DIRECT_HTTP:
+            session.proxies = {
+                "http": self.proxy_url,
+                "https": self.proxy_url,
+            }
         # Mimic Tor Browser fingerprint to reduce detection surface
         session.headers.update(
             {

@@ -46,7 +46,7 @@ services:
       retries: 10
 
   tor:
-    image: dperson/torproxy
+    image: peterdavehello/tor-socks-proxy:latest
     restart: unless-stopped
 
   backend:
