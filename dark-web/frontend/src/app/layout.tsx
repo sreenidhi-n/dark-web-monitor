@@ -1,20 +1,30 @@
 "use client";
 
 import { Inter } from "next/font/google";
-import Link from "next/link";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { RouteGuard } from "@/components/RouteGuard";
+import { AppNav } from "@/components/AppNav";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
 
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/findings", label: "Findings" },
-  { href: "/sources", label: "Sources" },
-  { href: "/watchlists", label: "Watchlists" },
-  { href: "/alerts", label: "Alerts" },
-];
+function AppShell({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const pathname = usePathname();
+  const isLogin = pathname === "/login";
+
+  if (isLogin || !user) return <>{children}</>;
+
+  return (
+    <>
+      <AppNav />
+      <main className="p-6">{children}</main>
+    </>
+  );
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -23,19 +33,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className={`${inter.className} bg-gray-950 text-gray-100 min-h-screen`}>
         <QueryClientProvider client={queryClient}>
-          <nav className="border-b border-gray-800 bg-gray-900 px-6 py-3 flex items-center gap-8">
-            <span className="font-bold text-red-500 tracking-widest text-sm">DWM</span>
-            {NAV.map(({ href, label }) => (
-              <Link
-                key={href}
-                href={href}
-                className="text-sm text-gray-400 hover:text-gray-100 transition-colors"
-              >
-                {label}
-              </Link>
-            ))}
-          </nav>
-          <main className="p-6">{children}</main>
+          <AuthProvider>
+            <RouteGuard>
+              <AppShell>{children}</AppShell>
+            </RouteGuard>
+          </AuthProvider>
         </QueryClientProvider>
       </body>
     </html>
